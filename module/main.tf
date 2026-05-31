@@ -18,7 +18,7 @@ module "vn" {
     
  source = "./STO"
 for_each = var.sunil
- sunil  =  each.value.name
+ sunil  =  module.rgs[each.key].rg_name
 sunil_l = each.value.location
 sto = each.value.sto
 
