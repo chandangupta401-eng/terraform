@@ -1,0 +1,150 @@
+
+# Resource Group
+
+
+resource "azurerm_resource_group" "rg" {
+  name     = "rg-scenario1"
+  location = "Central India"
+}
+
+# Virtual Network
+
+
+resource "azurerm_virtual_network" "vnet" {
+  name                = "vnet-scenario1"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  address_space = ["10.1.0.0/16"]
+}
+
+# Subnets
+
+
+locals {
+  subnets = {
+    web = "10.1.1.0/24"
+    app = "10.1.2.0/24"
+    db  = "10.1.3.0/24"
+  }
+}
+
+resource "azurerm_subnet" "subnet" {
+  for_each = local.subnets
+
+  name                 = each.key
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+
+  address_prefixes = [each.value]
+}
+
+
+# Network Security Group
+
+
+resource "azurerm_network_security_group" "web_nsg" {
+  name                = "web-nsg"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  security_rule {
+    name                       = "AllowSSH"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowHTTP"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+
+# Associate NSG to Web Subnet
+
+
+resource "azurerm_subnet_network_security_group_association" "web" {
+  subnet_id                 = azurerm_subnet.subnet["web"].id
+  network_security_group_id = azurerm_network_security_group.web_nsg.id
+}
+
+# VM Definitions
+
+
+locals {
+  vms = {
+    vm1 = {
+      subnet = "web"
+    }
+
+    vm2 = {
+      subnet = "web"
+    }
+  }
+}
+
+
+# NICs
+
+
+resource "azurerm_network_interface" "nic" {
+  for_each = local.vms
+
+  name                = "${each.key}-nic"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "ipconfig1"
+    subnet_id                     = azurerm_subnet.subnet[each.value.subnet].id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+# Linux VMs
+
+
+resource "azurerm_linux_virtual_machine" "linux" {
+  for_each = local.vms
+
+  name                = each.key
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+
+  size = "Standard_D2s_v3"
+
+  admin_username = "azureadmin"
+  admin_password = "P@ssword1234!"
+
+  disable_password_authentication = false
+
+  network_interface_ids = [
+    azurerm_network_interface.nic[each.key].id
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+}
