@@ -1,0 +1,185 @@
+resource "azurerm_resource_group" "RG" {
+name = "RG1"
+location = "CentralIndia"
+}
+
+resource "azurerm_virtual_network" "vnet" {
+    name = "vnet1"
+  location = azurerm_resource_group.RG.location
+  resource_group_name = azurerm_resource_group.RG.name
+address_space = ["10.0.0.0/16"]
+
+}
+
+locals {
+  subnets = {
+    web = "10.0.1.0/24"
+    app = "10.0.2.0/24"
+    db = "10.0.3.0/24"
+  }
+}
+
+resource "azurerm_subnet" "subnet" {
+    for_each = local.subnets
+    name = each.key
+  resource_group_name = azurerm_resource_group.RG.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes = [each.value]
+}
+
+resource "azurerm_network_interface" "NIC" {
+for_each = var.vms
+    name = each.value.nic
+  resource_group_name = azurerm_resource_group.RG.name
+  location = azurerm_resource_group.RG.location
+
+  ip_configuration {
+name = "internal"
+subnet_id = azurerm_subnet.subnet[each.value.subnet].id
+private_ip_address_allocation = "Dynamic"
+  }
+}
+resource "azurerm_network_interface_security_group_association" "nsgassociationweb" {
+for_each = var.vms
+network_interface_id = azurerm_network_interface.NIC[each.key].id
+network_security_group_id = azurerm_network_security_group.NGS1[each.value.nsg].id
+}
+
+locals {
+    nsg = {
+        nsg1 = {
+        port = ["80","443"]
+        source = "*"
+                }
+    
+        nsg2 = {
+        port = ["8080"]
+        source = "10.0.1.0/24"
+        }
+        nsg3 = {
+        port = ["1433"]
+        source = "10.0.2.0/24"
+        
+    }
+}
+}
+resource "azurerm_network_security_group" "NGS1" {
+  for_each = local.nsg
+  name = each.key
+  location = azurerm_resource_group.RG.location
+  resource_group_name = azurerm_resource_group.RG.name
+
+  security_rule {
+     name                       = "Allow-${each.key}"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges     = each.value.port
+    source_address_prefix      = each.value.source
+    destination_address_prefix = "*"
+  }
+
+  
+}
+
+
+resource "azurerm_linux_virtual_machine" "linux" {
+  for_each = {
+    for k, v in var.vms : k => v
+    if v.os == "linux"
+  }
+
+  name                = each.key
+  location            = azurerm_resource_group.RG.location
+  resource_group_name = azurerm_resource_group.RG.name
+  size                = "Standard_D2s_v3"
+  admin_username      = "azureuser"
+ admin_password = "Window@121212"
+  disable_password_authentication = false
+
+  network_interface_ids = [
+    azurerm_network_interface.NIC[each.key].id
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+}
+resource "azurerm_windows_virtual_machine" "windows" {
+  for_each = {
+    for k, v in var.vms : k => v
+    if v.os == "Window"
+  }
+
+  name                = each.key
+  location            = azurerm_resource_group.RG.location
+  resource_group_name = azurerm_resource_group.RG.name
+  size                = "Standard_D2s_v3"
+
+  admin_username = "azureadmin"
+  admin_password = "Window@121212"
+  network_interface_ids = [
+    azurerm_network_interface.NIC[each.key].id
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2022-datacenter"
+    version   = "latest"
+  }
+}
+
+
+
+variable "vms" {
+    default = {
+        vm1 = {
+            nic = "nic1"
+           nsg ="nsg1"
+            subnet = "web"
+             os     = "linux"
+            
+        }
+                vm2 = {
+            nic = "nic2"
+            subnet = "web"
+             os     = "linux"
+             nsg ="nsg1"
+        }
+                vm3 = {
+            nic = "nic3"
+            subnet = "app"
+             os     = "linux"
+             nsg ="nsg2"
+        }
+                vm4 = {
+            nic = "nic4"
+            subnet = "app"
+             os     = "linux"
+             nsg ="nsg2"
+        }
+                vm5 = {
+            nic = "nic5"
+            subnet = "db"
+            os     = "Window"
+            nsg ="nsg3"
+        
+        }
+    }
+}
