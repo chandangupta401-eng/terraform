@@ -1,0 +1,133 @@
+resource "azurerm_resource_group" "RG1" {
+    name = "RG1"
+  location = "central India"
+}
+
+
+resource "azurerm_virtual_network" "vnet" {
+name = "vnt1"
+location = azurerm_resource_group.RG1.location
+resource_group_name = azurerm_resource_group.RG1.name
+address_space = ["10.10.0.0/16"]
+}
+
+locals {
+  subnets = {
+    web = "10.10.1.0/24"
+    app = "10.10.2.0/24"
+  }
+}
+
+resource "azurerm_subnet" "subnet" {
+    for_each = local.subnets
+  name = each.key
+address_prefixes = [each.value]  
+virtual_network_name = azurerm_virtual_network.vnet.name
+resource_group_name = azurerm_resource_group.RG1.name
+}
+
+resource "azurerm_public_ip" "pub" {
+    for_each = var.vms
+    name = each.value.public
+  location = azurerm_resource_group.RG1.location
+  resource_group_name = azurerm_resource_group.RG1.name
+    allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_network_interface" "nic" {
+    for_each = var.vms
+    name = each.value.nic
+  resource_group_name = azurerm_resource_group.RG1.name
+  location = azurerm_resource_group.RG1.location
+  
+  	ip_configuration {
+	name                          = "internal"
+	subnet_id = azurerm_subnet.subnet[each.value.subnet].id
+	private_ip_address_allocation = "Dynamic"
+	public_ip_address_id = azurerm_public_ip.pub[each.key].id
+  }
+}
+
+resource "azurerm_network_security_group" "nsg" {
+    name = "NSG1"
+  location = azurerm_resource_group.RG1.location
+  resource_group_name = azurerm_resource_group.RG1.name
+
+ security_rule {
+    name                       = "test123"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges     = ["22","80","443"]
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  
+}
+
+resource "azurerm_network_interface_security_group_association" "assocaation" {
+    for_each = var.vms
+  network_interface_id = azurerm_network_interface.nic[each.key].id
+  network_security_group_id = azurerm_network_security_group.nsg.id
+  
+}
+
+resource "azurerm_linux_virtual_machine" "lvm" {
+    for_each = var.vms
+    name = each.key
+  location = azurerm_resource_group.RG1.location
+  resource_group_name = azurerm_resource_group.RG1.name
+  size = "Standard_D2s_v3"
+  admin_username = "adminuser"
+  admin_password = "Password@121212"
+  disable_password_authentication = false
+  network_interface_ids = [azurerm_network_interface.nic[each.key].id] 
+
+
+    os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+}
+
+
+
+#############
+
+# var.tf
+variable "vms" {}
+# terraform.tfvars
+
+
+vms = {
+    vm1 = {
+        nic = "nic1"
+        public = "public1"
+        NSGA = "NSGA1"
+        subnet = "web"
+    }
+    vm2 = {
+        nic = "nic2"
+        public = "public12"
+        NSGA = "NSGA2"
+        subnet = "web"
+    }
+    vm3 = {
+        nic = "nic3"
+        public = "public3"
+        NSGA = "NSGA3"
+        subnet = "app"
+    
+    }
+
+}
